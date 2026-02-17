@@ -1,16 +1,27 @@
 const express = require("express");
 const fs = require("fs");
+const { MongoClient } = require("mongodb");
 const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const CHECKLIST_PATH = path.join(__dirname, "mission_challenges_checklist.txt");
+const MONGO_URL = process.env.MONGO_URL || "";
+const MONGO_DB_NAME = process.env.MONGO_DB_NAME || "m4kdb";
+const MONGO_METRICS_COLLECTION = "runtime_metrics";
 
 const metrics = {
   totalRequests: 0,
   totalResponseTimeMs: 0,
   routes: {}
 };
+
+let mongoClient = null;
+let mongoMetricsCollection = null;
+let mongoConnected = false;
+let mongoInitStarted = false;
+let metricsPersistTimer = null;
+let metricsPersistInFlight = false;
 
 function toFixedNumber(value) {
   return Number(value.toFixed(2));
@@ -34,6 +45,95 @@ function readChecklistFile() {
 function routeMetricName(route) {
   const normalized = route.replaceAll("/", "_").replace(/[^a-zA-Z0-9_]/g, "_");
   return normalized.length === 0 ? "root" : normalized;
+}
+
+function buildMetricsSnapshot() {
+  return {
+    totalRequests: metrics.totalRequests,
+    totalResponseTimeMs: metrics.totalResponseTimeMs,
+    routes: metrics.routes
+  };
+}
+
+function restoreMetricsSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return;
+  }
+
+  if (typeof snapshot.totalRequests === "number") {
+    metrics.totalRequests = snapshot.totalRequests;
+  }
+  if (typeof snapshot.totalResponseTimeMs === "number") {
+    metrics.totalResponseTimeMs = snapshot.totalResponseTimeMs;
+  }
+  if (snapshot.routes && typeof snapshot.routes === "object") {
+    metrics.routes = snapshot.routes;
+  }
+}
+
+async function initMongoIfConfigured() {
+  if (!MONGO_URL || mongoInitStarted) {
+    return;
+  }
+
+  mongoInitStarted = true;
+
+  try {
+    mongoClient = new MongoClient(MONGO_URL, {
+      serverSelectionTimeoutMS: 3000
+    });
+    await mongoClient.connect();
+
+    const db = mongoClient.db(MONGO_DB_NAME);
+    mongoMetricsCollection = db.collection(MONGO_METRICS_COLLECTION);
+    mongoConnected = true;
+
+    const persistedMetrics = await mongoMetricsCollection.findOne({ _id: "service-metrics" });
+    if (persistedMetrics && persistedMetrics.snapshot) {
+      restoreMetricsSnapshot(persistedMetrics.snapshot);
+    }
+
+    console.log("MongoDB connected. Metrics persistence is enabled.");
+  } catch (error) {
+    mongoConnected = false;
+    console.warn(`MongoDB connection failed. Running memory-only mode: ${error.message}`);
+  }
+}
+
+async function persistMetricsSnapshot() {
+  if (!mongoMetricsCollection || metricsPersistInFlight) {
+    return;
+  }
+
+  metricsPersistInFlight = true;
+  try {
+    await mongoMetricsCollection.replaceOne(
+      { _id: "service-metrics" },
+      {
+        _id: "service-metrics",
+        snapshot: buildMetricsSnapshot(),
+        updatedAt: new Date()
+      },
+      { upsert: true }
+    );
+    mongoConnected = true;
+  } catch (error) {
+    mongoConnected = false;
+    console.warn(`MongoDB metrics persist failed: ${error.message}`);
+  } finally {
+    metricsPersistInFlight = false;
+  }
+}
+
+function scheduleMetricsPersistence() {
+  if (!mongoMetricsCollection || metricsPersistTimer) {
+    return;
+  }
+
+  metricsPersistTimer = setTimeout(() => {
+    metricsPersistTimer = null;
+    void persistMetricsSnapshot();
+  }, 1000);
 }
 
 function getK8sRuntimeInfo() {
@@ -70,6 +170,8 @@ app.use((req, res, next) => {
     metrics.routes[route].requests += 1;
     metrics.routes[route].totalResponseTimeMs += durationMs;
     metrics.routes[route].lastStatusCode = res.statusCode;
+
+    scheduleMetricsPersistence();
   });
 
   next();
@@ -86,7 +188,9 @@ app.get("/health", (req, res) => {
   res.status(200).json({
     service: "first-pipeline",
     healthy: true,
-    uptimeSeconds: Math.floor(process.uptime())
+    uptimeSeconds: Math.floor(process.uptime()),
+    mongoConfigured: Boolean(MONGO_URL),
+    mongoConnected
   });
 });
 
@@ -115,7 +219,12 @@ app.get("/metrics", (req, res) => {
     uptimeSeconds: Math.floor(process.uptime()),
     totalRequests: metrics.totalRequests,
     averageResponseMs,
-    routeMetrics
+    routeMetrics,
+    persistence: {
+      mode: mongoConnected ? "memory+mongo" : "memory-only",
+      mongoConfigured: Boolean(MONGO_URL),
+      mongoConnected
+    }
   });
 });
 
@@ -163,6 +272,16 @@ app.get("/k8s", (req, res) => {
   res.json({
     timestamp: new Date().toISOString(),
     ...getK8sRuntimeInfo()
+  });
+});
+
+app.get("/db-status", (req, res) => {
+  res.json({
+    timestamp: new Date().toISOString(),
+    mongoConfigured: Boolean(MONGO_URL),
+    mongoConnected,
+    database: MONGO_DB_NAME,
+    collection: MONGO_METRICS_COLLECTION
   });
 });
 
@@ -429,6 +548,7 @@ app.get("/", (req, res) => {
                 <li><a href="${baseUrl}/metrics">${baseUrl}/metrics</a></li>
                 <li><a href="${baseUrl}/metrics/prometheus">${baseUrl}/metrics/prometheus</a></li>
                 <li><a href="${baseUrl}/k8s">${baseUrl}/k8s</a></li>
+                <li><a href="${baseUrl}/db-status">${baseUrl}/db-status</a></li>
                 <li><a href="${baseUrl}/secret">${baseUrl}/secret</a></li>
                 <li><a href="${baseUrl}/coffee">${baseUrl}/coffee</a></li>
               </ul>
@@ -450,6 +570,7 @@ app.get("/", (req, res) => {
                 <div class="stat"><strong>${metrics.totalRequests}</strong>Total Requests</div>
                 <div class="stat"><strong>${averageResponseMs} ms</strong>Avg Response</div>
                 <div class="stat"><strong>${now}</strong>Server Time (UTC)</div>
+                <div class="stat"><strong>${mongoConnected ? "Connected" : "Memory only"}</strong>MongoDB persistence</div>
               </div>
             </article>
 
@@ -500,6 +621,8 @@ app.get("/", (req, res) => {
               <li><label class="task done"><input type="checkbox" checked disabled />Slack notifications for success and failure with commit details</label></li>
               <li><label class="task done"><input type="checkbox" checked disabled />Staging and production deploy workflow</label></li>
               <li><label class="task done"><input type="checkbox" checked disabled />Chaos restart job for staging</label></li>
+              <li><label class="task done"><input type="checkbox" checked disabled />MongoDB StatefulSet deployed in Kubernetes</label></li>
+              <li><label class="task done"><input type="checkbox" checked disabled />Secret-based configuration for database credentials</label></li>
             </ul>
           </section>
 
@@ -526,6 +649,7 @@ curl ${baseUrl}/status
 curl ${baseUrl}/health
 curl ${baseUrl}/metrics
 curl ${baseUrl}/metrics/prometheus
+curl ${baseUrl}/db-status
 curl ${baseUrl}/secret</pre>
               <p class="small">For local Trivy report: <code>trivy-report.txt</code>.</p>
             </article>
@@ -584,9 +708,12 @@ curl ${baseUrl}/secret</pre>
 });
 
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
+  (async () => {
+    await initMongoIfConfigured();
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  })();
 }
 
 module.exports = app;

@@ -33,27 +33,29 @@ flowchart LR
 - `GET /status` -> service status + timestamp
 - `GET /health` -> health check + uptime
 - `GET /metrics` -> request count and average response time metrics
+- `GET /db-status` -> MongoDB connection and persistence status
 - `GET /k8s` -> runtime proof (pod, namespace, node, kubernetes API host)
 
 ## Kubernetes
 Kubernetes manifests are included in `k8s/`:
 - Backend Deployment/Service (`first-pipeline`)
 - Frontend Deployment/Service (`frontend`)
+- MongoDB StatefulSet + headless Service (`mongo`)
 - Frontend ConfigMap (nginx reverse proxy)
+- Secret (`app-secrets`) for Mongo URL and credentials
 - Ingress, HPA, Namespace, Kustomization
 - Namespace: `m4k-pipeline`
 
 Quick deploy:
 ```bash
-docker build -t first-pipeline:k8s-v4 .
-kind load docker-image first-pipeline:k8s-v4 --name m4k
-kubectl apply -k k8s
-kubectl get all -n m4k-pipeline
+pwsh ./scripts/deploy-k8s.ps1
+# or
+./scripts/deploy-k8s.sh
 ```
 
 Proof for teacher:
 ```bash
-kubectl get deploy,svc,pods -n m4k-pipeline -o wide
+kubectl get deploy,sts,svc,pods -n m4k-pipeline -o wide
 kubectl port-forward svc/frontend 8080:80 -n m4k-pipeline
 curl http://localhost:8080/k8s
 ```
@@ -83,6 +85,8 @@ Members:
 - Slack notifications are sent on successful deploy and pipeline failure.
 - Chaos restart job is enabled for staging deploy flow.
 - Prometheus-format metrics are available at `GET /metrics/prometheus`.
+- Kubernetes Diamond extras: MongoDB StatefulSet, Secret, and deploy scripts.
+- Runtime metrics persistence is enabled in MongoDB (`runtime_metrics` collection).
 
 ## Future Plans
 - Add Grafana dashboard JSON and link screenshots for metrics.

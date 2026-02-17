@@ -5,6 +5,9 @@ namespace: m4k-pipeline
 
 resources:
   - namespace.yaml
+  - app-secret.yaml
+  - mongo-service.yaml
+  - mongo-statefulset.yaml
   - deployment.yaml
   - service.yaml
   - frontend-configmap.yaml
