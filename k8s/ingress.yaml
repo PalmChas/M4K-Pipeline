@@ -14,6 +14,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: first-pipeline
+                name: frontend
                 port:
                   number: 80

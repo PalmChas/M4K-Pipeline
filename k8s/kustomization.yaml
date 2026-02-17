@@ -7,5 +7,8 @@ resources:
   - namespace.yaml
   - deployment.yaml
   - service.yaml
+  - frontend-configmap.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
   - ingress.yaml
   - hpa.yaml

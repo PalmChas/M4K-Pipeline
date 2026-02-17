@@ -33,16 +33,29 @@ flowchart LR
 - `GET /status` -> service status + timestamp
 - `GET /health` -> health check + uptime
 - `GET /metrics` -> request count and average response time metrics
+- `GET /k8s` -> runtime proof (pod, namespace, node, kubernetes API host)
 
 ## Kubernetes
 Kubernetes manifests are included in `k8s/`:
-- Deployment, Service, Ingress, HPA, Kustomization
+- Backend Deployment/Service (`first-pipeline`)
+- Frontend Deployment/Service (`frontend`)
+- Frontend ConfigMap (nginx reverse proxy)
+- Ingress, HPA, Namespace, Kustomization
 - Namespace: `m4k-pipeline`
 
 Quick deploy:
 ```bash
+docker build -t first-pipeline:k8s-v4 .
+kind load docker-image first-pipeline:k8s-v4 --name m4k
 kubectl apply -k k8s
 kubectl get all -n m4k-pipeline
+```
+
+Proof for teacher:
+```bash
+kubectl get deploy,svc,pods -n m4k-pipeline -o wide
+kubectl port-forward svc/frontend 8080:80 -n m4k-pipeline
+curl http://localhost:8080/k8s
 ```
 
 ## Pipeline Demo GIF

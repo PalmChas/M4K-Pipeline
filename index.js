@@ -36,6 +36,18 @@ function routeMetricName(route) {
   return normalized.length === 0 ? "root" : normalized;
 }
 
+function getK8sRuntimeInfo() {
+  const inKubernetes = Boolean(process.env.KUBERNETES_SERVICE_HOST);
+
+  return {
+    inKubernetes,
+    kubernetesServiceHost: process.env.KUBERNETES_SERVICE_HOST || "not-set",
+    podName: process.env.POD_NAME || "not-set",
+    podNamespace: process.env.POD_NAMESPACE || "not-set",
+    nodeName: process.env.NODE_NAME || "not-set"
+  };
+}
+
 app.use((req, res, next) => {
   const start = process.hrtime.bigint();
 
@@ -147,6 +159,13 @@ app.get("/metrics/prometheus", (req, res) => {
     .send(`${lines.join("\n")}\n`);
 });
 
+app.get("/k8s", (req, res) => {
+  res.json({
+    timestamp: new Date().toISOString(),
+    ...getK8sRuntimeInfo()
+  });
+});
+
 app.get("/secret", (req, res) => {
   res.json({
     message: "You found the secret! Here's a cookie.",
@@ -187,6 +206,9 @@ app.get("/", (req, res) => {
     metrics.totalRequests === 0
       ? 0
       : toFixedNumber(metrics.totalResponseTimeMs / metrics.totalRequests);
+  const k8sInfo = getK8sRuntimeInfo();
+  const k8sStatus = k8sInfo.inKubernetes ? "Running in Kubernetes" : "Not running in Kubernetes";
+  const k8sStatusClass = k8sInfo.inKubernetes ? "ok" : "meta";
 
   res.type("html").send(`
     <!doctype html>
@@ -342,6 +364,10 @@ app.get("/", (req, res) => {
             font-size: 0.93rem;
             color: #475569;
           }
+          .mono {
+            font-family: Consolas, "Courier New", monospace;
+            word-break: break-all;
+          }
         </style>
       </head>
       <body>
@@ -370,6 +396,7 @@ app.get("/", (req, res) => {
                 <li><a href="${baseUrl}/health">${baseUrl}/health</a></li>
                 <li><a href="${baseUrl}/metrics">${baseUrl}/metrics</a></li>
                 <li><a href="${baseUrl}/metrics/prometheus">${baseUrl}/metrics/prometheus</a></li>
+                <li><a href="${baseUrl}/k8s">${baseUrl}/k8s</a></li>
                 <li><a href="${baseUrl}/secret">${baseUrl}/secret</a></li>
                 <li><a href="${baseUrl}/coffee">${baseUrl}/coffee</a></li>
               </ul>
@@ -392,6 +419,18 @@ app.get("/", (req, res) => {
                 <div class="stat"><strong>${averageResponseMs} ms</strong>Avg Response</div>
                 <div class="stat"><strong>${now}</strong>Server Time (UTC)</div>
               </div>
+            </article>
+
+            <article class="card">
+              <span class="badge">Kubernetes Evidence</span>
+              <h2 class="${k8sStatusClass}">${k8sStatus}</h2>
+              <ul>
+                <li><strong>Pod:</strong> <span class="mono">${k8sInfo.podName}</span></li>
+                <li><strong>Namespace:</strong> <span class="mono">${k8sInfo.podNamespace}</span></li>
+                <li><strong>Node:</strong> <span class="mono">${k8sInfo.nodeName}</span></li>
+                <li><strong>K8s API host:</strong> <span class="mono">${k8sInfo.kubernetesServiceHost}</span></li>
+              </ul>
+              <p class="small">Use <code>/k8s</code> for JSON proof during demo.</p>
             </article>
           </section>
 
