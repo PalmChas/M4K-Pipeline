@@ -368,6 +368,38 @@ app.get("/", (req, res) => {
             font-family: Consolas, "Courier New", monospace;
             word-break: break-all;
           }
+          .live-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 10px;
+            margin-top: 8px;
+          }
+          .live-pill {
+            display: inline-block;
+            border-radius: 999px;
+            padding: 3px 10px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+          }
+          .live-pill.ok {
+            background: #dcfce7;
+            color: #166534;
+          }
+          .live-pill.bad {
+            background: #fee2e2;
+            color: #991b1b;
+          }
+          .json-box {
+            margin-top: 8px;
+            background: #0f172a;
+            color: #dbeafe;
+            border-radius: 8px;
+            padding: 10px;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 0.82rem;
+            overflow-x: auto;
+          }
         </style>
       </head>
       <body>
@@ -432,6 +464,24 @@ app.get("/", (req, res) => {
               </ul>
               <p class="small">Use <code>/k8s</code> for JSON proof during demo.</p>
             </article>
+
+            <article class="card">
+              <span class="badge">Live Checks</span>
+              <h2>Status and Health</h2>
+              <p class="small">Auto-refresh every 15 seconds. Uses the same host you opened this page from.</p>
+              <div class="live-grid">
+                <div class="stat">
+                  <span id="status-pill" class="live-pill">Checking...</span>
+                  <strong id="status-code">-</strong>Status endpoint
+                  <div class="json-box" id="status-json">Loading /status...</div>
+                </div>
+                <div class="stat">
+                  <span id="health-pill" class="live-pill">Checking...</span>
+                  <strong id="health-code">-</strong>Health endpoint
+                  <div class="json-box" id="health-json">Loading /health...</div>
+                </div>
+              </div>
+            </article>
           </section>
 
           <section class="card section">
@@ -487,6 +537,47 @@ curl ${baseUrl}/secret</pre>
             <pre>${checklistText}</pre>
           </section>
         </main>
+        <script>
+          async function updateCheck(path, pillId, codeId, jsonId) {
+            const pillEl = document.getElementById(pillId);
+            const codeEl = document.getElementById(codeId);
+            const jsonEl = document.getElementById(jsonId);
+
+            try {
+              const response = await fetch(path, { cache: "no-store" });
+              const text = await response.text();
+              let body = text;
+
+              try {
+                body = JSON.stringify(JSON.parse(text), null, 2);
+              } catch (error) {}
+
+              codeEl.textContent = "HTTP " + response.status;
+              jsonEl.textContent = body;
+
+              if (response.ok) {
+                pillEl.textContent = "Healthy";
+                pillEl.className = "live-pill ok";
+              } else {
+                pillEl.textContent = "Error";
+                pillEl.className = "live-pill bad";
+              }
+            } catch (error) {
+              codeEl.textContent = "No response";
+              jsonEl.textContent = String(error.message || error);
+              pillEl.textContent = "Offline";
+              pillEl.className = "live-pill bad";
+            }
+          }
+
+          function refreshLiveChecks() {
+            updateCheck("/status", "status-pill", "status-code", "status-json");
+            updateCheck("/health", "health-pill", "health-code", "health-json");
+          }
+
+          refreshLiveChecks();
+          setInterval(refreshLiveChecks, 15000);
+        </script>
       </body>
     </html>
   `);
