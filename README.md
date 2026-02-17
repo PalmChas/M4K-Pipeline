@@ -34,6 +34,17 @@ flowchart LR
 - `GET /health` -> health check + uptime
 - `GET /metrics` -> request count and average response time metrics
 
+## Kubernetes
+Kubernetes manifests are included in `k8s/`:
+- Deployment, Service, Ingress, HPA, Kustomization
+- Namespace: `m4k-pipeline`
+
+Quick deploy:
+```bash
+kubectl apply -k k8s
+kubectl get all -n m4k-pipeline
+```
+
 ## Pipeline Demo GIF
 ![Pipeline Demo](https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExeWluNnN6dW5va2N1bDh1d2NubTRrMXh2Y2t6aW1wNnFhNXV0a2g4biZlcD12MV9naWZzX3NlYXJjaCZjdD1n/coxQHKASG60HrHtvkt/giphy.gif)
 
